@@ -1,0 +1,6 @@
+# Datos del negocio: nunca al repositorio (es público)
+*.xls
+*.xlsx
+*.csv
+node_modules/
+.DS_Store

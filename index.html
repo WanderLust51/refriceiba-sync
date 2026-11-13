@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cierre del día · Existencias Valery → Cashea</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230b5cab'/><path d='M16 6v20M7.3 11l17.4 10M7.3 21l17.4-10' stroke='white' stroke-width='2.6' stroke-linecap='round'/></svg>">
+<style>
+  :root {
+    --bg: #f4f6f9; --card: #fff; --ink: #14202e; --muted: #5d6b7c; --line: #dde3ea;
+    --blue: #0b5cab; --blue-soft: #e8f1fb; --green: #137a44; --green-soft: #e6f4ec;
+    --amber: #9a5b00; --amber-soft: #fff4dd; --red: #b42318; --red-soft: #fdecea;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); }
+  header { background: var(--blue); color: #fff; padding: 22px 20px 26px; }
+  header .wrap { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
+  header p { margin: 4px 0 0; opacity: .85; font-size: 14px; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  main { padding: 20px; }
+  .privacy { font-size: 13px; opacity: .85; }
+  section.step { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
+  section.step[hidden] { display: none; }
+  .step h2 { margin: 0 0 4px; font-size: 17px; display: flex; gap: 10px; align-items: center; }
+  .badge { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--blue); color: #fff; font-size: 14px; flex: none; }
+  .step > p.hint { margin: 0 0 14px 36px; color: var(--muted); font-size: 14px; }
+  .drops { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 720px) { .drops { grid-template-columns: 1fr; } }
+  .drop { position: relative; border: 2px dashed #b9c5d3; border-radius: var(--radius); padding: 18px; min-height: 140px; cursor: pointer; transition: .15s; background: #fafbfd; }
+  .drop:hover, .drop.over { border-color: var(--blue); background: var(--blue-soft); }
+  .drop.ok { border-style: solid; border-color: var(--green); background: var(--green-soft); }
+  .drop.err { border-style: solid; border-color: var(--red); background: var(--red-soft); }
+  .drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .drop strong { display: block; font-size: 15px; }
+  .drop .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .drop .file { margin-top: 10px; font-size: 13px; word-break: break-all; }
+  .drop .state { margin-top: 6px; font-size: 13px; font-weight: 600; }
+  .drop.ok .state { color: var(--green); } .drop.err .state { color: var(--red); }
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 6px 0 16px; }
+  @media (max-width: 720px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+  .tile { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .tile .n { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .tile .l { color: var(--muted); font-size: 13px; }
+  .tile.blue .n { color: var(--blue); } .tile.red .n { color: var(--red); }
+  .alert { border-radius: 10px; padding: 12px 14px; margin: 10px 0; font-size: 14px; border: 1px solid; }
+  .alert.warn { background: var(--amber-soft); border-color: #f1d49a; color: #5c3a00; }
+  .alert.bad { background: var(--red-soft); border-color: #f3b8b2; color: #7a1a12; }
+  .alert.info { background: var(--blue-soft); border-color: #bcd6f2; color: #0b3c70; }
+  .alert b { display: block; margin-bottom: 2px; }
+  .alert ul { margin: 6px 0 0; padding-left: 18px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 14px 0 8px; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tabs button { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; color: var(--ink); }
+  .tabs button[aria-pressed="true"] { background: var(--ink); color: #fff; border-color: var(--ink); }
+  input[type=search] { flex: 1; min-width: 180px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; }
+  .tablewrap { max-height: 420px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { position: sticky; top: 0; background: #f8fafc; font-weight: 600; font-size: 13px; color: var(--muted); z-index: 1; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.sku { white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  .arrow { color: var(--muted); padding: 0 4px; }
+  .down { color: var(--red); font-weight: 600; } .up { color: var(--green); font-weight: 600; }
+  .zero { background: var(--red-soft); }
+  .muted { color: var(--muted); }
+  .empty { padding: 18px; text-align: center; color: var(--muted); }
+  .confirm { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0 4px; font-size: 14px; }
+  .confirm input { width: 18px; height: 18px; margin-top: 2px; }
+  .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; border: 0; border-radius: 10px; padding: 12px 18px; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; }
+  .btn.primary { background: var(--blue); color: #fff; }
+  .btn.primary:disabled { background: #9db6cf; cursor: not-allowed; }
+  .btn.ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); }
+  .btn.ghost:disabled { color: #a0abb8; cursor: not-allowed; }
+  ol.final { margin: 14px 0 0; padding-left: 20px; }
+  ol.final li { margin-bottom: 6px; }
+  details { margin-top: 14px; }
+  details summary { cursor: pointer; color: var(--blue); font-weight: 600; }
+  details ul { color: var(--ink); }
+  footer { color: var(--muted); font-size: 12px; text-align: center; padding: 10px 20px 30px; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -2px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div>
+      <h1>Cierre del día · Existencias</h1>
+      <p>Valery → Cashea. Valery manda: el stock de Cashea queda igual al de Valery.</p>
+    </div>
+    <div class="privacy">🔒 Los archivos se procesan en esta computadora; no se suben a ningún lado.</div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="step" id="step1">
+    <h2><span class="badge">1</span> Carga los dos archivos</h2>
+    <p class="hint">Antes de empezar: todas las ventas del día (tienda, web y Cashea) deben estar facturadas en Valery.</p>
+    <div class="drops">
+      <label class="drop" id="dropValery">
+        <input type="file" id="fileValery" accept=".xls,.xlsx">
+        <strong>Reporte de Valery</strong>
+        <div class="sub">Listado de Productos (.xls) recién exportado.</div>
+        <div class="file"></div><div class="state"></div>
+      </label>
+      <label class="drop" id="dropCashea">
+        <input type="file" id="fileCashea" accept=".xlsx">
+        <strong>Planilla de Cashea</strong>
+        <div class="sub">Inventario → Actualizar productos → <em>Planilla de precio, cuotas y stock</em> → Descargar, <b>sin filtros</b>. No la abras en Excel.</div>
+        <div class="file"></div><div class="state"></div>
+      </label>
+    </div>
+    <div id="loadErrors"></div>
+  </section>
+
+  <section class="step" id="step2" hidden>
+    <h2><span class="badge">2</span> Revisa los cambios</h2>
+    <p class="hint">Así quedará Cashea. Solo cambia la columna Stock; títulos, precios y cuotas no se tocan.</p>
+    <div class="tiles">
+      <div class="tile blue"><div class="n" id="tCambia">0</div><div class="l">productos cambian</div></div>
+      <div class="tile red"><div class="n" id="tCero">0</div><div class="l">quedan en 0</div></div>
+      <div class="tile"><div class="n" id="tIgual">0</div><div class="l">ya estaban bien</div></div>
+      <div class="tile"><div class="n" id="tSin">0</div><div class="l">no se tocan</div></div>
+    </div>
+    <div id="alerts"></div>
+    <div class="toolbar">
+      <div class="tabs" role="group" aria-label="Filtrar">
+        <button data-f="cambios" aria-pressed="true">Cambios</button>
+        <button data-f="cero" aria-pressed="false">Quedan en 0</button>
+        <button data-f="sin" aria-pressed="false">No se tocan</button>
+        <button data-f="todo" aria-pressed="false">Todo</button>
+      </div>
+      <input type="search" id="q" placeholder="Buscar por SKU o nombre…">
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>SKU</th><th>Producto</th><th class="num">Valery</th><th class="num">Cashea: antes → después</th><th>Nota</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="step" id="step3" hidden>
+    <h2><span class="badge">3</span> Descarga y sube a Cashea</h2>
+    <div id="confirmBox"></div>
+    <div class="actions">
+      <button class="btn primary" id="dlCashea" disabled>⬇ Descargar planilla para Cashea</button>
+      <button class="btn ghost" id="dlReport" disabled>Reporte del cierre (.xlsx)</button>
+    </div>
+    <ol class="final">
+      <li>En Cashea ve a <b>Inventario → Actualizar productos → Planilla de precio, cuotas y stock</b>.</li>
+      <li>Presiona <b>Subir</b> y elige el archivo que acabas de descargar (<span id="outName" class="muted">cashea_stock_…xlsx</span>).</li>
+      <li>Revisa uno o dos productos de la lista de cambios para confirmar que quedaron bien.</li>
+    </ol>
+    <details>
+      <summary>Reglas del cierre</summary>
+      <ul>
+        <li>Toda venta del día se factura en Valery antes de sacar el reporte.</li>
+        <li>La planilla de Cashea se descarga justo antes de usarla. Cada planilla se puede subir una sola vez; si algo falla, se descarga otra.</li>
+        <li>Los combos (SKU sin número de Valery) no se actualizan solos: su stock se ajusta a mano en Cashea.</li>
+        <li>Productos por kilo o metro: se publica la parte entera (9,5 kg → 9).</li>
+      </ul>
+    </details>
+  </section>
+</main>
+<footer>refriceiba-sync · Refrigeraciones La Ceiba</footer>
+
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<script src="js/sync.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
