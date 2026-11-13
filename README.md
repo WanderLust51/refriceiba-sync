@@ -9,10 +9,10 @@ Todo corre en el navegador. Los archivos no se suben a ningún servidor; la pág
 ## Uso diario
 
 1. Facturar en Valery todas las ventas del día (tienda, web y Cashea).
-2. Exportar de Valery el **Listado de Productos** (`.xls`).
-3. En Cashea: **Inventario → Actualizar productos → Planilla de precio, cuotas y stock → Descargar**, sin filtros. No abrirla en Excel.
+2. **Valery:** Reportes → Listados → Listado de productos → Exportar.
+3. **Cashea:** Inventario → Actualizar productos → *Planilla de precio, cuotas y stock*: Descargar → seleccionar todas las categorías → Descargar planilla. No abrirla en Excel.
 4. Abrir la página, cargar los dos archivos y revisar los cambios.
-5. Descargar la planilla generada y subirla en Cashea, en la misma sección (**Subir**).
+5. Descargar la planilla generada y subirla en Cashea, en la misma sección (**Subir**). Hacerlo el mismo día: lo vendido por Cashea del día siguiente se calcula contra esa planilla.
 
 Cada planilla de Cashea se puede subir una sola vez. Si algo falla, se descarga otra y se repite.
 
@@ -30,11 +30,28 @@ Cada planilla de Cashea se puede subir una sola vez. Si algo falla, se descarga 
 | Más de 50 cambios en un cierre | Pide confirmación antes de descargar |
 | Planilla de Cashea con más de 60 minutos | Avisa que conviene descargarla de nuevo |
 
-## Movimiento entre cierres
+## Ventas del día por canal
 
-Al descargar la planilla, la página guarda en el navegador (`localStorage`, unos 12 KB) una foto de las existencias de Valery: una por día, con un máximo de 14 días. En el siguiente cierre compara contra la foto del día anterior más reciente y muestra cuánto subió o bajó cada producto, cuántos códigos son nuevos y cuáles desaparecieron. No distingue canales de venta: es el neto de ventas facturadas y entradas de mercancía.
+Al descargar la planilla, la página guarda en el navegador (`localStorage`, unos 12 KB por día, máximo 14 días) dos listas de números:
 
-La foto vive solo en esa computadora y en ese navegador. Si se usa otra computadora o se borran los datos del navegador, se puede cargar a mano el reporte de Valery anterior ("comparar con otro reporte").
+- `valery`: `{ código: existencia }` del reporte de Valery.
+- `cashea`: `{ SKU: stock }` con el que queda Cashea después de subir la planilla.
+
+En el siguiente cierre compara contra el último cierre **de un día anterior** al del reporte de Valery que se está usando. Si el mismo día se hace el cierre varias veces, se guarda solo el último y la comparación sigue siendo contra el día anterior.
+
+| Dato | Cálculo |
+|---|---|
+| Vendido por Cashea | stock subido a Cashea ayer − stock que trae hoy la planilla de Cashea |
+| Vendido por tienda y web | lo que bajó Valery − lo vendido por Cashea |
+| Entradas | lo que subió Valery |
+| ¿Falta facturar? | Cashea vendió más de lo que bajó Valery |
+| Ajuste manual en Cashea | el stock de Cashea subió desde la planilla de ayer |
+
+Supone que Cashea descuenta su stock al vender y que la planilla de ayer se subió. Las ventas y entradas de un mismo producto en el mismo día se compensan (se ve el neto).
+
+**Fechas:** la planilla de Cashea trae adentro la hora en que Cashea la generó (fecha de las entradas del `.xlsx`), y se usa esa. El `.xls` de Valery no trae fecha; se usa la hora en que se exportó el archivo.
+
+Si se usa otra computadora o se borran los datos del navegador, se pierde el historial. En ese caso se puede cargar a mano el reporte de Valery anterior y se ve el movimiento total, sin separar por canal.
 
 Las pestañas **Suben** y **Bajan** filtran los cambios que se van a aplicar en Cashea.
 

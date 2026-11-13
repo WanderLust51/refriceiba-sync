@@ -125,7 +125,11 @@
     const header = readCells(xml, shared, 2).get(2) || {};
     if (norm(header.B) !== 'sku' || norm(header.C) !== 'stock')
       throw new Error('La planilla no tiene "SKU" en la columna B y "Stock" en la C. ¿Es la "Planilla de precio, cuotas y stock" de Cashea?');
-    return { zip, sheetPath, xml, rows: readCells(xml, shared, FIRST_DATA_ROW) };
+    // Cashea graba la hora de generación en las entradas del zip: es la fecha real de la planilla,
+    // aunque el archivo se renombre o se copie.
+    const dates = Object.values(zip.files).map((f) => f.date && f.date.getTime()).filter(Boolean);
+    const generatedAt = dates.length ? new Date(Math.min(...dates)) : null;
+    return { zip, sheetPath, xml, generatedAt, rows: readCells(xml, shared, FIRST_DATA_ROW) };
   }
 
   /* ---------------- Cruce ---------------- */
@@ -206,6 +210,74 @@
     };
   }
 
+  // Stock con el que queda Cashea después de subir la planilla: { SKU: stock }.
+  function casheaSnapshot(comparison) {
+    const out = {};
+    for (const r of comparison.filas) {
+      const v = r.stockNuevo !== null ? r.stockNuevo : r.stockAnterior;
+      if (v !== null && v !== undefined) out[r.sku] = v;
+    }
+    return out;
+  }
+
+  /*
+   * Ventas por canal desde el cierre anterior.
+   *  base.valery : { código: existencia } al cierre anterior
+   *  base.cashea : { SKU: stock subido a Cashea } al cierre anterior
+   * Cashea vendido   = stock subido ayer − stock que trae hoy la planilla (Cashea descuenta al vender).
+   * Valery neto      = existencia ayer − existencia hoy (todas las ventas facturadas, menos entradas).
+   * Otros canales    = Valery neto − Cashea vendido (tienda y web), cuando Valery bajó.
+   */
+  function dailySales(base, valery, comparison) {
+    const byCode = new Map();
+    const get = (code) => {
+      if (!byCode.has(code)) {
+        const v = valery.get(code);
+        const antes = base.valery[code];
+        byCode.set(code, { code, nombre: v ? v.nombre : '', antes: antes === undefined ? null : antes,
+          ahora: v ? round6(v.existencia) : null, cashea: 0, skus: [], ajusteCashea: 0 });
+      }
+      return byCode.get(code);
+    };
+    const subidoSinBase = [];
+    for (const r of comparison.filas) {
+      if (!r.codigo || r.revisarSku) continue;
+      const prev = base.cashea[r.sku];
+      if (prev === undefined || r.stockAnterior === null) { if (prev === undefined) subidoSinBase.push(r.sku); continue; }
+      const d = prev - r.stockAnterior;
+      const rec = get(r.codigo);
+      rec.skus.push(r.sku);
+      if (d > 0) rec.cashea += d; else if (d < 0) rec.ajusteCashea += -d;
+    }
+    for (const [code] of valery) if (code in base.valery) get(code);
+
+    const rows = [];
+    for (const rec of byCode.values()) {
+      if (rec.antes === null || rec.ahora === null) continue;
+      const neto = round6(rec.antes - rec.ahora);          // > 0: bajó en Valery
+      const salida = Math.max(0, neto), entrada = Math.max(0, -neto);
+      const otros = round6(salida - rec.cashea);
+      rec.neto = neto; rec.entrada = entrada;
+      rec.otros = Math.max(0, otros);
+      rec.faltaFacturar = rec.cashea > salida;              // Cashea vendió más de lo que bajó Valery
+      if (neto !== 0 || rec.cashea || rec.ajusteCashea) rows.push(rec);
+    }
+    rows.sort((a, b) => (b.cashea + b.otros) - (a.cashea + a.otros) || b.entrada - a.entrada);
+    const sum = (k) => round6(rows.reduce((a, r) => a + r[k], 0));
+    const nuevos = [...valery.values()].filter((v) => !(v.code in base.valery));
+    return {
+      rows,
+      byCode: new Map(rows.map((r) => [r.code, r])),
+      totales: { cashea: sum('cashea'), otros: sum('otros'), entradas: sum('entrada'), ajusteCashea: sum('ajusteCashea') },
+      productos: { cashea: rows.filter((r) => r.cashea > 0).length, otros: rows.filter((r) => r.otros > 0).length,
+                   entradas: rows.filter((r) => r.entrada > 0).length },
+      faltaFacturar: rows.filter((r) => r.faltaFacturar),
+      ajustesCashea: rows.filter((r) => r.ajusteCashea > 0),
+      nuevos,
+      quitados: Object.keys(base.valery).filter((c) => !valery.has(c)),
+    };
+  }
+
   /* ---------------- Planilla de salida ---------------- */
   async function buildCasheaFile(cashea, comparison) {
     const newVals = new Map(comparison.filas.filter((r) => r.stockNuevo !== null).map((r) => [r.fila, r.stockNuevo]));
@@ -218,7 +290,7 @@
     return cashea.zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
   }
 
-  function buildReport(XLSX, comparison, mov, baseLabel) {
+  function buildReport(XLSX, comparison, mov, baseLabel, ventas) {
     const toRows = (list) => list.map((r) => ({
       'SKU': r.sku, 'Título': r.titulo, 'Código Valery': r.codigo, 'Existencia Valery': r.existenciaValery,
       'Stock anterior': r.stockAnterior, 'Stock nuevo': r.stockNuevo, 'Acción': r.accion, 'Motivo': r.motivo, 'Fila': r.fila,
@@ -237,6 +309,13 @@
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(toRows(comparison.duplicados)), 'Duplicados');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(comparison.noPublicados.map((v) => ({
       'Código': v.code, 'Nombre': v.nombre, 'Existencia': v.existencia }))), 'No publicados en Cashea');
+    if (ventas) {
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ventas.rows.map((r) => ({
+        'Código': r.code, 'Nombre': r.nombre, [`Valery ${baseLabel || 'antes'}`]: r.antes, 'Valery ahora': r.ahora,
+        'Vendido por Cashea': r.cashea, 'Vendido tienda/web': r.otros, 'Entrada de mercancía': r.entrada,
+        'Nota': [r.faltaFacturar ? 'Cashea vendió más de lo que bajó Valery: ¿falta facturar?' : '',
+                 r.ajusteCashea ? `Stock subido a mano en Cashea (+${r.ajusteCashea})` : ''].filter(Boolean).join('; ') }))), 'Ventas del día');
+    }
     if (mov) {
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mov.list.map((m) => ({
         'Código': m.code, 'Nombre': m.nombre, [`Valery ${baseLabel || 'antes'}`]: m.antes, 'Valery ahora': m.ahora,
@@ -246,5 +325,5 @@
     return XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
   }
 
-  return { valeryCode, targetStock, sameProduct, snapshot, movement, parseValery, loadCashea, compare, buildCasheaFile, buildReport };
+  return { valeryCode, targetStock, sameProduct, snapshot, casheaSnapshot, movement, dailySales, parseValery, loadCashea, compare, buildCasheaFile, buildReport };
 });

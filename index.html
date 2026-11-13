@@ -36,6 +36,9 @@
   .drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
   .drop strong { display: block; font-size: 15px; }
   .drop .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .drop ol.how { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+  .drop ol.how b { color: var(--ink); font-weight: 600; }
+  .drop ol.how li { margin-bottom: 1px; }
   .drop .file { margin-top: 10px; font-size: 13px; word-break: break-all; }
   .drop .state { margin-top: 6px; font-size: 13px; font-weight: 600; }
   .drop.ok .state { color: var(--green); } .drop.err .state { color: var(--red); }
@@ -53,6 +56,11 @@
   .mov label.linkish { position: relative; }
   .mov label.linkish input { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
   .delta { font-size: 12px; margin-left: 4px; }
+  .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 6px; }
+  @media (max-width: 720px) { .kpis { grid-template-columns: 1fr; } }
+  .kpis > div { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .kpis .k { display: block; font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .mov b.inline { display: inline; margin: 0; }
   .tile.blue .n { color: var(--blue); } .tile.red .n { color: var(--red); }
   .alert { border-radius: 10px; padding: 12px 14px; margin: 10px 0; font-size: 14px; border: 1px solid; }
   .alert.warn { background: var(--amber-soft); border-color: #f1d49a; color: #5c3a00; }
@@ -113,13 +121,22 @@
       <label class="drop" id="dropValery">
         <input type="file" id="fileValery" accept=".xls,.xlsx">
         <strong>Reporte de Valery</strong>
-        <div class="sub">Listado de Productos (.xls) recién exportado.</div>
+        <ol class="how">
+          <li><b>Reportes</b> → <b>Listados</b> → <b>Listado de productos</b></li>
+          <li><b>Exportar</b> y guardar el .xls</li>
+          <li>Arrastrarlo aquí o hacer clic para elegirlo</li>
+        </ol>
         <div class="file"></div><div class="state"></div>
       </label>
       <label class="drop" id="dropCashea">
         <input type="file" id="fileCashea" accept=".xlsx">
         <strong>Planilla de Cashea</strong>
-        <div class="sub">Inventario → Actualizar productos → <em>Planilla de precio, cuotas y stock</em> → Descargar, <b>sin filtros</b>. No la abras en Excel.</div>
+        <ol class="how">
+          <li><b>Inventario</b> → <b>Actualizar productos</b></li>
+          <li>En <em>Planilla de precio, cuotas y stock</em>: <b>Descargar</b></li>
+          <li>Seleccionar <b>todas las categorías</b> → <b>Descargar planilla</b></li>
+          <li>Sin abrirla en Excel, arrastrarla aquí</li>
+        </ol>
         <div class="file"></div><div class="state"></div>
       </label>
     </div>
@@ -176,7 +193,9 @@
         <li>La planilla de Cashea se descarga justo antes de usarla. Cada planilla se puede subir una sola vez; si algo falla, se descarga otra.</li>
         <li>Los combos (SKU sin número de Valery) no se actualizan solos: su stock se ajusta a mano en Cashea.</li>
         <li>Productos por kilo o metro: se publica la parte entera (9,5 kg → 9).</li>
-        <li>Al descargar la planilla, la página guarda en esta computadora una foto de las existencias de Valery. En el próximo cierre la usa para mostrar cuánto se movió cada producto. Si se usa otra computadora o se borran los datos del navegador, se puede cargar a mano el reporte de Valery anterior.</li>
+        <li>Al descargar la planilla, la página guarda en esta computadora dos listas de números: las existencias de Valery y el stock que se sube a Cashea. En el próximo cierre las compara para mostrar lo vendido por Cashea y por tienda/web. Se guarda un cierre por día (el último del día), y siempre se compara con el día anterior, aunque hoy se haga el cierre más de una vez.</li>
+        <li>Para que lo vendido por Cashea sea correcto, la planilla descargada se tiene que subir a Cashea ese mismo día.</li>
+        <li>Si se usa otra computadora o se borran los datos del navegador, se pierde el historial; se puede cargar a mano el reporte de Valery anterior para ver al menos el movimiento total.</li>
       </ul>
     </details>
   </section>
