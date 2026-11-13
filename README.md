@@ -30,6 +30,16 @@ Cada planilla de Cashea se puede subir una sola vez. Si algo falla, se descarga 
 | Más de 50 cambios en un cierre | Pide confirmación antes de descargar |
 | Planilla de Cashea con más de 60 minutos | Avisa que conviene descargarla de nuevo |
 
+## Movimiento entre cierres
+
+Al descargar la planilla, la página guarda en el navegador (`localStorage`, unos 12 KB) una foto de las existencias de Valery: una por día, con un máximo de 14 días. En el siguiente cierre compara contra la foto del día anterior más reciente y muestra cuánto subió o bajó cada producto, cuántos códigos son nuevos y cuáles desaparecieron. No distingue canales de venta: es el neto de ventas facturadas y entradas de mercancía.
+
+La foto vive solo en esa computadora y en ese navegador. Si se usa otra computadora o se borran los datos del navegador, se puede cargar a mano el reporte de Valery anterior ("comparar con otro reporte").
+
+Las pestañas **Suben** y **Bajan** filtran los cambios que se van a aplicar en Cashea.
+
+## Cómo se edita la planilla
+
 Solo se modifica la columna **Stock** de la planilla: se editan esas celdas directamente en el XML del `.xlsx`, sin regenerar el archivo. Títulos, SKU, precios, cuotas y la validación de Cashea quedan intactos. Cashea identifica los productos por fila, por eso no se borran ni se reordenan filas.
 
 ## Estructura

@@ -164,12 +164,45 @@
       filas: result,
       cambios: result.filter((r) => r.accion === 'Cambia'),
       aCero: result.filter((r) => r.accion === 'Cambia' && r.stockNuevo === 0),
+      suben: result.filter((r) => r.accion === 'Cambia' && (r.stockAnterior === null || r.stockNuevo > r.stockAnterior)),
+      bajan: result.filter((r) => r.accion === 'Cambia' && r.stockAnterior !== null && r.stockNuevo < r.stockAnterior),
       decimales: result.filter((r) => r.motivo.includes('decimal') || r.motivo.includes('negativo')),
       sinTocar: result.filter((r) => r.accion === 'Sin tocar'),
       revisarSku: result.filter((r) => r.revisarSku),
       duplicados,
       noPublicados,
       resumen: { total: result.length, cambia: count('Cambia'), igual: count('Igual'), sinTocar: count('Sin tocar'), valery: valery.size },
+    };
+  }
+
+  /* ---------------- Movimiento en Valery entre dos cierres ---------------- */
+  const round6 = (x) => Math.round(x * 1e6) / 1e6;
+
+  // Foto compacta de Valery: { código: existencia } (~10 KB para 600 productos).
+  function snapshot(valery) {
+    const out = {};
+    for (const [code, v] of valery) out[code] = round6(v.existencia);
+    return out;
+  }
+
+  // prev: foto anterior { código: existencia } (de snapshot()) o un Map de parseValery.
+  function movement(prev, valery) {
+    const before = prev instanceof Map ? snapshot(prev) : prev;
+    const list = [];
+    for (const [code, v] of valery) {
+      const ahora = round6(v.existencia);
+      if (!(code in before)) { list.push({ code, nombre: v.nombre, antes: null, ahora, delta: null, nuevo: true }); continue; }
+      const delta = round6(ahora - before[code]);
+      if (delta !== 0) list.push({ code, nombre: v.nombre, antes: before[code], ahora, delta, nuevo: false });
+    }
+    const quitados = Object.keys(before).filter((c) => !valery.has(c));
+    const bajan = list.filter((m) => m.delta < 0), suben = list.filter((m) => m.delta > 0);
+    const sum = (l) => round6(l.reduce((a, m) => a + Math.abs(m.delta), 0));
+    list.sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0));
+    return {
+      list, bajan, suben, nuevos: list.filter((m) => m.nuevo), quitados,
+      unidadesBajan: sum(bajan), unidadesSuben: sum(suben),
+      byCode: new Map(list.map((m) => [m.code, m])),
     };
   }
 
@@ -185,7 +218,7 @@
     return cashea.zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
   }
 
-  function buildReport(XLSX, comparison) {
+  function buildReport(XLSX, comparison, mov, baseLabel) {
     const toRows = (list) => list.map((r) => ({
       'SKU': r.sku, 'Título': r.titulo, 'Código Valery': r.codigo, 'Existencia Valery': r.existenciaValery,
       'Stock anterior': r.stockAnterior, 'Stock nuevo': r.stockNuevo, 'Acción': r.accion, 'Motivo': r.motivo, 'Fila': r.fila,
@@ -204,9 +237,14 @@
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(toRows(comparison.duplicados)), 'Duplicados');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(comparison.noPublicados.map((v) => ({
       'Código': v.code, 'Nombre': v.nombre, 'Existencia': v.existencia }))), 'No publicados en Cashea');
+    if (mov) {
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(mov.list.map((m) => ({
+        'Código': m.code, 'Nombre': m.nombre, [`Valery ${baseLabel || 'antes'}`]: m.antes, 'Valery ahora': m.ahora,
+        'Movimiento': m.nuevo ? 'nuevo' : m.delta }))), 'Movimiento Valery');
+    }
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(toRows(comparison.filas)), 'Todo');
     return XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
   }
 
-  return { valeryCode, targetStock, sameProduct, parseValery, loadCashea, compare, buildCasheaFile, buildReport };
+  return { valeryCode, targetStock, sameProduct, snapshot, movement, parseValery, loadCashea, compare, buildCasheaFile, buildReport };
 });

@@ -44,6 +44,15 @@
   .tile { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
   .tile .n { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
   .tile .l { color: var(--muted); font-size: 13px; }
+  .tile .ud { font-size: 12px; margin-top: 4px; color: var(--muted); }
+  .tile .ud .up, .tile .ud .down { font-weight: 600; }
+  .mov { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin: 10px 0; font-size: 14px; background: #fafbfd; }
+  .mov b { display: block; margin-bottom: 4px; }
+  .mov .row { display: flex; gap: 18px; flex-wrap: wrap; }
+  .mov .linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--blue); text-decoration: underline; cursor: pointer; }
+  .mov label.linkish { position: relative; }
+  .mov label.linkish input { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
+  .delta { font-size: 12px; margin-left: 4px; }
   .tile.blue .n { color: var(--blue); } .tile.red .n { color: var(--red); }
   .alert { border-radius: 10px; padding: 12px 14px; margin: 10px 0; font-size: 14px; border: 1px solid; }
   .alert.warn { background: var(--amber-soft); border-color: #f1d49a; color: #5c3a00; }
@@ -121,24 +130,28 @@
     <h2><span class="badge">2</span> Revisa los cambios</h2>
     <p class="hint">Así quedará Cashea. Solo cambia la columna Stock; títulos, precios y cuotas no se tocan.</p>
     <div class="tiles">
-      <div class="tile blue"><div class="n" id="tCambia">0</div><div class="l">productos cambian</div></div>
+      <div class="tile blue"><div class="n" id="tCambia">0</div><div class="l">productos cambian</div><div class="ud"><span class="up">▲ <span id="tSuben">0</span> suben</span> · <span class="down">▼ <span id="tBajan">0</span> bajan</span></div></div>
       <div class="tile red"><div class="n" id="tCero">0</div><div class="l">quedan en 0</div></div>
       <div class="tile"><div class="n" id="tIgual">0</div><div class="l">ya estaban bien</div></div>
       <div class="tile"><div class="n" id="tSin">0</div><div class="l">no se tocan</div></div>
     </div>
+    <div id="movBox"></div>
     <div id="alerts"></div>
     <div class="toolbar">
       <div class="tabs" role="group" aria-label="Filtrar">
         <button data-f="cambios" aria-pressed="true">Cambios</button>
+        <button data-f="suben" aria-pressed="false">Suben</button>
+        <button data-f="bajan" aria-pressed="false">Bajan</button>
         <button data-f="cero" aria-pressed="false">Quedan en 0</button>
         <button data-f="sin" aria-pressed="false">No se tocan</button>
         <button data-f="todo" aria-pressed="false">Todo</button>
+        <button data-f="mov" aria-pressed="false" id="tabMov" hidden>Movimiento en Valery</button>
       </div>
       <input type="search" id="q" placeholder="Buscar por SKU o nombre…">
     </div>
     <div class="tablewrap">
       <table>
-        <thead><tr><th>SKU</th><th>Producto</th><th class="num">Valery</th><th class="num">Cashea: antes → después</th><th>Nota</th></tr></thead>
+        <thead id="thead"></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
@@ -163,6 +176,7 @@
         <li>La planilla de Cashea se descarga justo antes de usarla. Cada planilla se puede subir una sola vez; si algo falla, se descarga otra.</li>
         <li>Los combos (SKU sin número de Valery) no se actualizan solos: su stock se ajusta a mano en Cashea.</li>
         <li>Productos por kilo o metro: se publica la parte entera (9,5 kg → 9).</li>
+        <li>Al descargar la planilla, la página guarda en esta computadora una foto de las existencias de Valery. En el próximo cierre la usa para mostrar cuánto se movió cada producto. Si se usa otra computadora o se borran los datos del navegador, se puede cargar a mano el reporte de Valery anterior.</li>
       </ul>
     </details>
   </section>
