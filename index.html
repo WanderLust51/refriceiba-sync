@@ -36,6 +36,27 @@
   .drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
   .drop strong { display: block; font-size: 15px; }
   .drop .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .drop[hidden] { display: none; }
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0 10px; }
+  @media (max-width: 720px) { .modes { grid-template-columns: 1fr; } }
+  .modes button { text-align: left; border: 1px solid var(--line); background: #fff; border-radius: 10px; padding: 10px 14px; font: inherit; cursor: pointer; color: var(--ink); }
+  .modes button b { display: block; font-size: 15px; }
+  .modes button span { color: var(--muted); font-size: 13px; }
+  .modes button[aria-checked="true"] { border: 2px solid var(--blue); background: var(--blue-soft); padding: 9px 13px; }
+  .modes button[aria-checked="true"] b::before { content: "● "; color: var(--blue); }
+  ul.docs { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 8px; }
+  ul.docs[hidden] { display: none; }
+  ul.docs li { display: flex; gap: 12px; align-items: center; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 14px; }
+  ul.docs li.err { border-color: #f3b8b2; background: var(--red-soft); }
+  ul.docs li.warn { border-color: #f1d49a; background: var(--amber-soft); }
+  ul.docs .tag { font-size: 12px; font-weight: 700; border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
+  ul.docs .tag.ventas { background: #fde7e7; color: var(--red); }
+  ul.docs .tag.compra { background: var(--green-soft); color: var(--green); }
+  ul.docs .tag.error { background: #fff; color: var(--red); border: 1px solid #f3b8b2; }
+  ul.docs .info { flex: 1; min-width: 0; }
+  ul.docs .info .n { font-weight: 600; word-break: break-all; }
+  ul.docs .info .d { color: var(--muted); font-size: 13px; }
+  ul.docs button { border: 0; background: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 0 4px; }
   .drop ol.how { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
   .drop ol.how b { color: var(--ink); font-weight: 600; }
   .drop ol.how li { margin-bottom: 1px; }
@@ -66,7 +87,7 @@
   .alert.warn { background: var(--amber-soft); border-color: #f1d49a; color: #5c3a00; }
   .alert.bad { background: var(--red-soft); border-color: #f3b8b2; color: #7a1a12; }
   .alert.info { background: var(--blue-soft); border-color: #bcd6f2; color: #0b3c70; }
-  .alert b { display: block; margin-bottom: 2px; }
+  .alert > b:first-child { display: block; margin-bottom: 2px; }
   .alert ul { margin: 6px 0 0; padding-left: 18px; }
   .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 14px 0 8px; }
   .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -115,18 +136,37 @@
 
 <main class="wrap">
   <section class="step" id="step1">
-    <h2><span class="badge">1</span> Carga los dos archivos</h2>
+    <h2><span class="badge">1</span> Carga los archivos</h2>
+    <div class="modes" role="radiogroup" aria-label="Cómo actualizar">
+      <button type="button" role="radio" data-mode="completo" aria-checked="true">
+        <b>Inventario completo</b><span>Listado de productos de Valery. Corrige todo Cashea.</span>
+      </button>
+      <button type="button" role="radio" data-mode="movimientos" aria-checked="false">
+        <b>Movimientos del día</b><span>Ventas y facturas de compra. Solo cambia lo que se movió.</span>
+      </button>
+    </div>
     <p class="hint">Antes de empezar: todas las ventas del día (tienda, web y Cashea) deben estar facturadas en Valery.</p>
+    <div id="baseInfo"></div>
     <div class="drops">
       <label class="drop" id="dropValery">
         <input type="file" id="fileValery" accept=".xls,.xlsx">
-        <strong>Reporte de Valery</strong>
+        <strong>Listado de productos de Valery</strong>
         <ol class="how">
           <li><b>Reportes</b> → <b>Listados</b> → <b>Listado de productos</b></li>
           <li><b>Exportar</b> y guardar el .xls</li>
           <li>Arrastrarlo aquí o hacer clic para elegirlo</li>
         </ol>
         <div class="file"></div><div class="state"></div>
+      </label>
+      <label class="drop" id="dropDocs" hidden>
+        <input type="file" id="fileDocs" accept=".xls,.xlsx,.pdf" multiple>
+        <strong>Reportes del día</strong>
+        <div class="sub">Puedes cargar varios a la vez, en cualquier orden:</div>
+        <ol class="how">
+          <li><b>Ventas:</b> Reportes → Ventas → Relación de ventas → <b>Relación de ventas por producto</b> → Exportar (.xls)</li>
+          <li><b>Compras:</b> Reimprimir → Compras → Facturas de compras (<em>Recepción de factura de compra</em>) → guardar en PDF. Una por factura.</li>
+        </ol>
+        <div class="state"></div>
       </label>
       <label class="drop" id="dropCashea">
         <input type="file" id="fileCashea" accept=".xlsx">
@@ -140,7 +180,7 @@
         <div class="file"></div><div class="state"></div>
       </label>
     </div>
-    <div id="loadErrors"></div>
+    <ul class="docs" id="docList" hidden></ul>
   </section>
 
   <section class="step" id="step2" hidden>
@@ -150,7 +190,7 @@
       <div class="tile blue"><div class="n" id="tCambia">0</div><div class="l">productos cambian</div><div class="ud"><span class="up">▲ <span id="tSuben">0</span> suben</span> · <span class="down">▼ <span id="tBajan">0</span> bajan</span></div></div>
       <div class="tile red"><div class="n" id="tCero">0</div><div class="l">quedan en 0</div></div>
       <div class="tile"><div class="n" id="tIgual">0</div><div class="l">ya estaban bien</div></div>
-      <div class="tile"><div class="n" id="tSin">0</div><div class="l">no se tocan</div></div>
+      <div class="tile"><div class="n" id="tSin">0</div><div class="l">no se tocan</div><div class="ud" id="tSinMov"></div></div>
     </div>
     <div id="movBox"></div>
     <div id="alerts"></div>
@@ -204,6 +244,7 @@
 
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="vendor/jszip.min.js"></script>
+<script src="vendor/pdf.min.js"></script>
 <script src="js/sync.js"></script>
 <script src="js/app.js"></script>
 </body>

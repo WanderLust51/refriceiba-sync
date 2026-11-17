@@ -6,13 +6,25 @@ Valery es la fuente de verdad. La página no modifica Valery ni se conecta a Cas
 
 Todo corre en el navegador. Los archivos no se suben a ningún servidor; la página es estática y se publica en GitHub Pages.
 
-## Uso diario
+## Dos formas de hacer el cierre
 
-1. Facturar en Valery todas las ventas del día (tienda, web y Cashea).
-2. **Valery:** Reportes → Listados → Listado de productos → Exportar.
+La página tiene un selector arriba:
+
+**Inventario completo** (Listado de productos). Pone todo Cashea igual a Valery. Es la referencia: conviene usarlo al menos una vez por semana y siempre la primera vez en una computadora.
+
+1. Facturar en Valery todas las ventas del día.
+2. **Valery:** Reportes → Listados → Listado de productos → Exportar (.xls).
 3. **Cashea:** Inventario → Actualizar productos → *Planilla de precio, cuotas y stock*: Descargar → seleccionar todas las categorías → Descargar planilla. No abrirla en Excel.
-4. Abrir la página, cargar los dos archivos y revisar los cambios.
-5. Descargar la planilla generada y subirla en Cashea, en la misma sección (**Subir**). Hacerlo el mismo día: lo vendido por Cashea del día siguiente se calcula contra esa planilla.
+4. Cargar los dos archivos, revisar, descargar la planilla generada y subirla en Cashea (**Subir**) el mismo día.
+
+**Movimientos del día** (ventas y compras). Solo cambia los productos que se movieron:
+**existencia nueva = existencia guardada en el último cierre − ventas + compras.**
+
+- **Ventas:** Reportes → Ventas → Relación de ventas → Relación de ventas por producto → Exportar (.xls). Con el rango de fechas desde el último cierre.
+- **Compras:** Reimprimir → Compras → Facturas de compras (Recepción de factura de compra) → PDF. Una por factura; se pueden cargar varias.
+- Más la planilla de Cashea, igual que arriba.
+
+Se parte de la existencia de Valery que guardó el último cierre (de cualquier modo), no del stock de Cashea: la planilla de Cashea ya trae descontadas sus propias ventas y la Relación de ventas también las incluye, así que restarlas al stock de Cashea las descontaría dos veces.
 
 Cada planilla de Cashea se puede subir una sola vez. Si algo falla, se descarga otra y se repite.
 
@@ -55,6 +67,15 @@ Si se usa otra computadora o se borran los datos del navegador, se pierde el his
 
 Las pestañas **Suben** y **Bajan** filtran los cambios que se van a aplicar en Cashea.
 
+## Modo movimientos: detalles
+
+- **Factura de compra (PDF):** se lee con pdf.js por posición (el texto del PDF se monta: nombres en dos líneas, "440V6,00"). Cada número se asigna a la columna cuyo encabezado termina más cerca (columnas alineadas a la derecha). Unidades recibidas = Ord. + Bonif. Validación por línea: cantidad × costo × (1 − descuentos) = subtotal; las líneas que no cuadran **no se aplican** y se avisan. También se compara la suma de subtotales con "Total Lineas".
+- **Relación de ventas (.xls):** columnas `Código`, `Nombre`, `Cant (Und. Principal)`; la última fila (totales) no tiene nombre y se descarta. No trae fecha ni canal de venta.
+- **No aplicar dos veces:** cada documento tiene una huella (factura: RIF + número; ventas: hash del archivo) que se guarda en `localStorage` (`refriceiba-sync/documentos`) al descargar la planilla. Si se vuelve a cargar, se marca como "ya aplicado" y no se descuenta.
+- **Regenerar:** si los reportes cargados son justo los del último cierre (por ejemplo, falló la subida a Cashea), la página regenera la planilla con ese resultado sin volver a aplicarlos.
+- **Avisos:** productos nuevos en Valery sin existencia guardada (se incluyen con el próximo inventario completo), productos que quedarían en negativo, productos con movimiento no publicados en Cashea, cierre previo del mismo día (riesgo de contar ventas dos veces), Cashea vendió más de lo que dice el reporte (falta facturar) y último inventario completo con más de 7 días.
+- Necesita un cierre guardado en esa computadora; si no hay, pide hacer primero un inventario completo.
+
 ## Cómo se edita la planilla
 
 Solo se modifica la columna **Stock** de la planilla: se editan esas celdas directamente en el XML del `.xlsx`, sin regenerar el archivo. Títulos, SKU, precios, cuotas y la validación de Cashea quedan intactos. Cashea identifica los productos por fila, por eso no se borran ni se reordenan filas.
@@ -65,14 +86,15 @@ Solo se modifica la columna **Stock** de la planilla: se editan esas celdas dire
 index.html          Interfaz
 js/sync.js          Lógica (lectura de Valery, cruce, edición de la planilla). Funciona también en Node.
 js/app.js           Comportamiento de la página
-vendor/             SheetJS 0.18.5 (lee el .xls de Valery) y JSZip 3.10 (edita la planilla de Cashea)
+vendor/             SheetJS 0.18.5 (lee los .xls de Valery), JSZip 3.10 (edita la planilla de Cashea),
+                    pdf.js 3.11.174 (lee las facturas de compra en PDF; se usa con isEvalSupported: false)
 test/verificar.js   Corre la lógica en Node con archivos reales
 ```
 
 ## Verificar con archivos reales
 
 ```bash
-npm install --no-save xlsx@0.18.5 jszip@3
+npm install --no-save xlsx@0.18.5 jszip@3 pdfjs-dist@3.11.174
 node test/verificar.js Listado_de_Productos.xls planilla_cashea.xlsx salida.xlsx
 ```
 

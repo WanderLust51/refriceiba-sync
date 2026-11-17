@@ -1,6 +1,6 @@
 # Contexto del proyecto: refriceiba-sync
 
-Este archivo resume todo lo hecho hasta el 17/11/2026 para continuar en Claude Code. Léelo antes de cambiar código. El `README.md` describe la herramienta para usuarios; aquí están las decisiones, los datos reales y lo pendiente.
+Este archivo resume todo lo hecho hasta el 17/11/2026 (incluye el modo movimientos) para continuar en Claude Code. Léelo antes de cambiar código. El `README.md` describe la herramienta para usuarios; aquí están las decisiones, los datos reales y lo pendiente.
 
 ## El negocio
 
@@ -19,11 +19,12 @@ Página estática (sin build) para GitHub Pages: `https://wanderlust51.github.io
 index.html          Interfaz (CSS inline)
 js/sync.js          Lógica pura; funciona en navegador y en Node (UMD → window.RefriSync)
 js/app.js           Interfaz: carga de archivos, alertas, tabla, descargas, localStorage
-vendor/             SheetJS 0.18.5 (xlsx.full.min.js, lee el .xls de Valery) y JSZip 3.10
+vendor/             SheetJS 0.18.5 (lee los .xls de Valery), JSZip 3.10, pdf.js 3.11.174 (facturas PDF;
+                    siempre con isEvalSupported: false por la vulnerabilidad CVE-2024-4367 de esa versión)
 test/verificar.js   node test/verificar.js VALERY.xls PLANILLA.xlsx [SALIDA.xlsx]
 ```
 
-Pruebas en Node: `npm install --no-save xlsx@0.18.5 jszip@3`. **Nunca subir al repo archivos .xls/.xlsx/.csv del negocio**: el repo es público y `.gitignore` ya los excluye. Para probar, pedirle a Andrés los archivos y trabajar fuera del repo.
+Pruebas en Node: `npm install --no-save xlsx@0.18.5 jszip@3 pdfjs-dist@3.11.174` (en Node usar `pdfjs-dist/legacy/build/pdf.js`). **Nunca subir al repo archivos .xls/.xlsx/.csv del negocio**: el repo es público y `.gitignore` ya los excluye. Para probar, pedirle a Andrés los archivos y trabajar fuera del repo.
 
 ## Archivos de entrada (formatos reales)
 
@@ -43,6 +44,18 @@ Pruebas en Node: `npm install --no-save xlsx@0.18.5 jszip@3`. **Nunca subir al r
 - **Trae fecha adentro:** las entradas del zip tienen la hora de generación (UTC); JSZip la expone en `file.date`. Se usa esa.
 - SKU en Cashea: `REF-123` (mayúscula) para la mayoría; 178 todavía son solo el número (`123`) mientras los migran a `REF-`; 19 combos con SKU propio (`13GMCC`, `COMB-MM`…).
 - Hay otra opción, "Planilla de catálogo completo" (todos los campos), y una plantilla de **carga masiva** ("Cargar_Productos", una hoja por categoría, 20 columnas, validaciones de lista en filas 6–104 ≈ 99 productos por hoja) para crear productos nuevos.
+
+### Valery: "Relación de Ventas por Producto" (modo movimientos)
+- Cómo se obtiene: **Reportes → Ventas → Relación de ventas → Relación de ventas por producto → Exportar** (.xls).
+- Columnas: `Código`, `Nombre`, `Departamento Código`, `Departamento Nombre`, `Cant (Und. Principal)`, totales en Bs y moneda contable. Solo trae los productos vendidos. Última fila = totales sin nombre.
+- No trae fecha ni canal (no distingue ventas de Cashea).
+
+### Valery: factura de compra en PDF (modo movimientos)
+- Cómo se obtiene: **Reimprimir → Compras → Facturas de compras** ("Recepción de factura de compra"), en PDF (ReportBuilder).
+- Encabezado: proveedor, RIF (`J-50161271-4`), número (`2736`) bajo "FACTURA DE COMPRA", "Fecha Emisión" (`16/nov./2026`).
+- Columnas: Código, Nombre, Cantidad Ord., Bonif., Costo Lista, % Dcto 1, % Dcto 2, Sub Total, Impuesto, Total. Números con formato `1.234,56`.
+- El texto extraído línea por línea se monta; se lee por posición (ver `parseCompra`). Validado con la factura 2736 de COLDWA: 15 líneas, todas cuadran y la suma da el Total Lineas (269.910,56).
+- Esa factura trae códigos nuevos (640–647) que no estaban en el listado del 13/11.
 
 ### WordPress / WooCommerce
 - Exportación nativa (Productos → Exportar) en CSV con encabezados en español: `ID`, `Tipo`, `SKU`, `Nombre`, `Publicado`, `¿Existencias?`, `Inventario`, `Precio normal` (coma decimal, ej. `6,5`), `Categorías`, `Imágenes`, `Marcas`…
@@ -66,6 +79,20 @@ Pruebas en Node: `npm install --no-save xlsx@0.18.5 jszip@3`. **Nunca subir al r
 | Reporte de Valery que no es de hoy | Alerta |
 
 **Edición de la planilla:** se modifica solo el `<v>` de las celdas `C{fila}` directamente en el XML de la hoja (regex sobre `<c r="C5" ...>`), quitando el atributo `t` si lo hubiera. El resto del zip queda igual. Verificado: cero celdas distintas fuera de la columna C, validaciones intactas, y resultado idéntico al del script Python original.
+
+## Dos modos de cierre (selector en el paso 1)
+
+- **Inventario completo:** Listado de productos + planilla de Cashea. Compara todos los productos.
+- **Movimientos del día:** Relación de ventas (.xls) y/o facturas de compra (PDF, varias) + planilla de Cashea.
+  `existencia nueva = existencia de Valery guardada en el último cierre − ventas + compras`, y solo se tocan en Cashea los productos con movimiento (los demás quedan "Sin movimiento").
+  - Se parte de la existencia guardada, **no** del stock de Cashea: la planilla ya trae descontadas las ventas de Cashea y la Relación de ventas también las incluye (todo se factura en Valery), así que se descontarían dos veces.
+  - Requiere un cierre guardado en esa computadora (si no, pide un inventario completo primero). Sugiere un inventario completo si el último tiene más de 7 días.
+  - Huella por documento (`compra:RIF:número`, `ventas:sha256`) en `refriceiba-sync/documentos`; un documento ya aplicado no se aplica de nuevo. Si los documentos son justo los del último cierre, se **regenera** la planilla sin reaplicar (`replayMovements`), útil si falló la subida.
+  - Líneas de compra que no cuadran (cantidad × costo × descuentos ≠ subtotal) no se aplican. Unidades recibidas = Ord. + Bonif.
+  - Avisos: productos nuevos sin existencia guardada, negativos, con movimiento pero no publicados en Cashea, cierre previo el mismo día (ventas contadas dos veces), Cashea vendió más de lo reportado.
+  - Al descargar se guarda el cierre (modo `movimientos`, con `docs` y `ultimoCompleto`) y se marcan los documentos.
+- El modo elegido se recuerda en `refriceiba-sync/modo`.
+- Probado el 17/11 con la Relación de ventas (8 productos, 14,6 unid.) y la factura 2736 (15 productos, 65 unid.): 12 cambios en Cashea, 2 productos vendidos sin publicar (274 gas R22, 323 capacitor 2,5UF), 8 productos nuevos y 1 negativo (566). Solo cambian celdas de la columna C.
 
 ## Ventas del día por canal (localStorage)
 
@@ -108,9 +135,10 @@ Ese día no se mostró el panel de ventas porque la base y el cierre fueron el m
 
 ## Pendientes
 
-1. Diagnosticar el problema del 13/11 con los archivos reales.
+1. Diagnosticar el problema del 13/11 con los archivos reales. (El modo movimientos ya muestra qué productos con movimiento no están publicados en Cashea; es la causa más probable.)
+1b. Probar el modo movimientos en un cierre real: confirmar que el rango de fechas de la Relación de ventas coincide con el período desde el último cierre, y que la cantidad de la factura de compra está en la unidad principal.
 2. **WordPress:** WooCommerce trae un importador CSV (Productos → Importar → "Actualizar productos existentes"). Hace coincidir por ID o SKU y **omite las filas sin coincidencia**, así que no crea productos. Plan: que la página genere un CSV `SKU,Inventario` desde Valery (todos los códigos como `REF-{código}`), excluyendo productos sin inventario gestionado. Primero, una prueba con un solo producto, como se hizo con Cashea. Requiere rol Gestor de tienda o Administrador. Descartado: llamar la API de WooCommerce desde la página, porque expondría las claves en un repo público.
-3. Alerta explícita de "productos nuevos en Valery que no están en Cashea" (ahora solo aparecen en el conteo y en el reporte).
+3. Alerta de "productos nuevos en Valery que no están en Cashea": hecha en modo movimientos y para los productos con movimiento en modo completo.
 4. Confirmar que Cashea descuenta su stock al vender (necesario para las ventas por canal).
 5. Corregir en WordPress los SKU `573` y `576` a `REF-`.
 6. Publicar en Cashea los 155 faltantes cuando esté completa la hoja de marca/peso.

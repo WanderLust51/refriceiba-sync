@@ -6,6 +6,11 @@
  *  - SKU "REF-123" o "123" en Cashea = Código 123 en Valery.
  *  - Stock = parte entera de la existencia de Valery; negativo → 0.
  *  - Solo se modifica la columna Stock (C) de la planilla de Cashea; todo lo demás queda intacto.
+ *
+ * Dos modos de carga:
+ *  - Inventario completo: Listado de Productos de Valery (existencia de todos los productos).
+ *  - Movimientos del día: Relación de Ventas por Producto (.xls) y/o facturas de compra (PDF),
+ *    aplicados sobre la última existencia guardada:  existencia = guardada − ventas + compras.
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
@@ -133,7 +138,10 @@
   }
 
   /* ---------------- Cruce ---------------- */
-  function compare(valery, cashea) {
+  // opts.only: Set de códigos con movimiento (modo movimientos). Los demás quedan "Sin movimiento".
+  // opts.sinBase: Map código → nombre de productos con movimiento pero sin existencia guardada.
+  function compare(valery, cashea, opts = {}) {
+    const only = opts.only || null, sinBase = opts.sinBase || new Map();
     const result = [];
     const byCode = new Map();
     for (const [row, cells] of [...cashea.rows.entries()].sort((a, b) => a[0] - b[0])) {
@@ -142,7 +150,9 @@
       const old = cells.C === null || cells.C === undefined || cells.C === '' ? null : Math.trunc(Number(cells.C));
       const code = valeryCode(sku);
       const rec = { fila: row, sku, titulo: cells.A || '', codigo: code, stockAnterior: old, existenciaValery: null, stockNuevo: null, accion: '', motivo: '' };
-      if (code === null) { rec.accion = 'Sin tocar'; rec.motivo = 'SKU sin código de Valery (combo u otro)'; }
+      if (code === null) { rec.accion = only ? 'Sin movimiento' : 'Sin tocar'; rec.motivo = 'SKU sin código de Valery (combo u otro)'; }
+      else if (only && sinBase.has(code)) { rec.accion = 'Sin tocar'; rec.motivo = 'Producto sin existencia guardada: hacer un cierre con inventario completo'; }
+      else if (only && !only.has(code)) { rec.accion = 'Sin movimiento'; rec.motivo = ''; }
       else if (!valery.has(code)) { rec.accion = 'Sin tocar'; rec.motivo = 'El código no existe en Valery'; }
       else if (!sameProduct(rec.titulo, valery.get(code).nombre)) {
         rec.accion = 'Sin tocar';
@@ -162,7 +172,7 @@
     }
     const duplicados = [...byCode.values()].filter((l) => l.length > 1).flat();
     const enCashea = new Set(byCode.keys());
-    const noPublicados = [...valery.values()].filter((v) => !enCashea.has(v.code));
+    const noPublicados = [...valery.values()].filter((v) => !enCashea.has(v.code) && (!only || only.has(v.code)));
     const count = (a) => result.filter((r) => r.accion === a).length;
     return {
       filas: result,
@@ -172,11 +182,180 @@
       bajan: result.filter((r) => r.accion === 'Cambia' && r.stockAnterior !== null && r.stockNuevo < r.stockAnterior),
       decimales: result.filter((r) => r.motivo.includes('decimal') || r.motivo.includes('negativo')),
       sinTocar: result.filter((r) => r.accion === 'Sin tocar'),
+      sinMovimiento: result.filter((r) => r.accion === 'Sin movimiento'),
       revisarSku: result.filter((r) => r.revisarSku),
       duplicados,
       noPublicados,
-      resumen: { total: result.length, cambia: count('Cambia'), igual: count('Igual'), sinTocar: count('Sin tocar'), valery: valery.size },
+      resumen: { total: result.length, cambia: count('Cambia'), igual: count('Igual'), sinTocar: count('Sin tocar'),
+                 sinMovimiento: count('Sin movimiento'), valery: only ? only.size : valery.size, modo: only ? 'movimientos' : 'completo' },
     };
+  }
+
+  /* ---------------- Reportes del día ---------------- */
+  const num = (v) => {
+    if (typeof v === 'number') return v;
+    const t = String(v ?? '').trim();
+    if (!t) return NaN;
+    // "1.234,56" (Venezuela) → 1234.56 ; "2.6" → 2.6
+    return /,\d+$/.test(t) ? Number(t.replace(/\./g, '').replace(',', '.')) : Number(t);
+  };
+
+  // ¿Qué reporte de Valery es este .xls? 'listado' | 'ventas' | null
+  function detectXls(XLSX, data) {
+    const wb = XLSX.read(data, { type: 'array' });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null }).slice(0, 15);
+    const has = (t) => rows.some((r) => r.some((c) => norm(c) === t));
+    if (has('codigo') && has('existencia actual')) return 'listado';
+    if (has('codigo') && rows.some((r) => r.some((c) => norm(c).startsWith('cant')))) return 'ventas';
+    return null;
+  }
+
+  // Valery: Reportes → Ventas → Relación de ventas → Relación de ventas por producto.
+  // Columnas: Código, Nombre, …, "Cant (Und. Principal)", … La última fila es de totales (sin nombre).
+  function parseVentas(XLSX, data) {
+    const wb = XLSX.read(data, { type: 'array' });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null });
+    const hIdx = rows.findIndex((r) => r.some((c) => norm(c) === 'codigo') && r.some((c) => norm(c).startsWith('cant')));
+    if (hIdx < 0) throw new Error('No tiene las columnas "Código" y "Cant". ¿Es la Relación de Ventas por Producto?');
+    const h = rows[hIdx].map(norm);
+    const cCod = h.indexOf('codigo'), cNom = h.indexOf('nombre');
+    const cCant = h.findIndex((c) => c.startsWith('cant'));
+    const lineas = new Map();
+    for (const r of rows.slice(hIdx + 1)) {
+      const nombre = cNom >= 0 ? r[cNom] : 'x';
+      if (nombre === null || String(nombre).trim() === '') continue;      // fila de totales
+      const code = String(r[cCod] ?? '').trim().replace(/\.0+$/, '');
+      if (!/^\d+$/.test(code)) continue;
+      const cant = num(r[cCant]);
+      if (!Number.isFinite(cant)) continue;
+      const prev = lineas.get(code);
+      lineas.set(code, { code, nombre: String(nombre).trim(), cant: round6((prev ? prev.cant : 0) + cant) });
+    }
+    if (!lineas.size) throw new Error('El reporte de ventas no tiene productos.');
+    const list = [...lineas.values()];
+    return { tipo: 'ventas', lineas: list, unidades: round6(list.reduce((a, l) => a + l.cant, 0)) };
+  }
+
+  /*
+   * Valery: Reimprimir → Compras → Facturas de compras ("Recepción de factura de compra"), en PDF.
+   * Se lee por posición: el texto del PDF se monta (nombres de dos líneas, "440V6,00"), así que se
+   * ubica cada código a la izquierda y la cantidad alineada bajo la columna "Ord.".
+   * Validación: cantidad × costo = subtotal en cada línea, y la suma de subtotales = "Total Lineas".
+   */
+  async function parseCompra(pdfjs, data) {
+    let doc;
+    try { doc = await pdfjs.getDocument({ data: new Uint8Array(data), isEvalSupported: false }).promise; }
+    catch (e) { throw new Error('No se pudo abrir el PDF.'); }
+    const items = [];
+    for (let p = 1; p <= doc.numPages; p++) {
+      const tc = await (await doc.getPage(p)).getTextContent();
+      for (const it of tc.items) {
+        const s = String(it.str || '').trim();
+        if (s) items.push({ s, p, x: it.transform[4], y: it.transform[5], r: it.transform[4] + it.width });
+      }
+    }
+    const find = (txt, p) => items.find((i) => (p === undefined || i.p === p) && norm(i.s) === norm(txt));
+    if (!items.some((i) => norm(i.s) === 'factura de compra'))
+      throw new Error('Este PDF no es una "Factura de compra" de Valery.');
+
+    // Encabezado del documento
+    const sameRow = (a, b) => a.p === b.p && Math.abs(a.y - b.y) < 3;
+    const rightOf = (label) => { const l = find(label); return l ? items.filter((i) => sameRow(i, l) && i.x > l.x).sort((a, b) => a.x - b.x) : []; };
+    const provRow = rightOf('Proveedor:');
+    const rif = (provRow.find((i) => /^[JVGEP]-?\d/i.test(i.s)) || {}).s || '';
+    const proveedor = (provRow.find((i) => !/^[JVGEP]-?\d/i.test(i.s)) || {}).s || '';
+    const fc = find('FACTURA DE COMPRA');
+    const numero = fc ? ((items.filter((i) => i.p === fc.p && i.y < fc.y && fc.y - i.y < 20 && /^[\w-]+$/.test(i.s))
+      .sort((a, b) => b.y - a.y)[0]) || {}).s || '' : '';
+    const fecha = (rightOf('Fecha Emisión:')[0] || {}).s || '';
+
+    const lineas = [];
+    let totalLineas = null;
+    for (let p = 1; p <= doc.numPages; p++) {
+      const hOrd = find('Ord.', p), hNom = find('Nombre', p);
+      if (!hOrd || !hNom) continue;
+      // Columnas numéricas, alineadas a la derecha: cada número va a la columna cuyo encabezado
+      // termina más cerca de donde termina el número.
+      const heads = [['ord', 'Ord.'], ['bonif', 'Bonif.'], ['costo', 'Costo Lista'], ['d1', '% Dcto 1'], ['d2', '% Dcto 2'],
+        ['sub', 'Sub Total'], ['imp', 'Impuesto'], ['total', 'Total']]
+        .map(([k, t]) => ({ k, h: items.find((i) => i.p === p && norm(i.s) === norm(t) && Math.abs(i.y - hOrd.y) < 3) }))
+        .filter((c) => c.h);
+      const colOf = (i) => heads.reduce((best, c) => (!best || Math.abs(c.h.r - i.r) < Math.abs(best.h.r - i.r) ? c : best), null).k;
+      const tl = find('Total Lineas', p);
+      if (tl) { const v = items.find((i) => sameRow(i, tl) && i.x > tl.x && /\d/.test(i.s)); if (v) totalLineas = num(v.s); }
+      const bottom = tl ? tl.y : -Infinity;
+      const isNum = (i) => /^[\d.]+,\d+$/.test(i.s);
+      const codes = items.filter((i) => i.p === p && i.y < hOrd.y - 3 && i.y > bottom && i.r < hNom.x - 2 && /^\d+$/.test(i.s))
+        .sort((a, b) => b.y - a.y);
+      codes.forEach((c, k) => {
+        const next = codes[k + 1];
+        const top = c.y + 4, low = next ? next.y + 4 : bottom;          // franja de la línea
+        const band = items.filter((i) => i.p === p && i.y <= top && i.y > low && i !== c);
+        const val = (key) => {
+          const it = band.filter((i) => isNum(i) && i.x > hNom.x + 20 && colOf(i) === key)
+            .sort((a, b) => Math.abs(a.y - c.y) - Math.abs(b.y - c.y))[0];
+          return it ? num(it.s) : NaN;
+        };
+        const nombre = band.filter((i) => i.x >= hNom.x - 3 && i.x < hOrd.x - 4 && !isNum(i))
+          .sort((a, b) => b.y - a.y || a.x - b.x).map((i) => i.s).join(' ');
+        const cant = val('ord'), bonif = val('bonif'), costo = val('costo'), subtotal = val('sub');
+        const d1 = val('d1') || 0, d2 = val('d2') || 0;
+        const esperado = cant * costo * (1 - d1 / 100) * (1 - d2 / 100);
+        const cuadra = [cant, costo, subtotal].every(Number.isFinite) && Math.abs(esperado - subtotal) <= Math.max(0.05, subtotal * 0.0005);
+        lineas.push({ code: c.s, nombre, cant: Number.isFinite(cant) ? round6(cant + (Number.isFinite(bonif) ? bonif : 0)) : NaN,
+                      ordenada: cant, bonif: Number.isFinite(bonif) ? bonif : 0, costo, subtotal, cuadra });
+      });
+    }
+    if (!lineas.length) throw new Error('No se encontraron productos en la factura de compra.');
+    const sumSub = round6(lineas.reduce((a, l) => a + (Number.isFinite(l.subtotal) ? l.subtotal : 0), 0));
+    const cuadraTotal = totalLineas !== null && Math.abs(sumSub - totalLineas) <= 0.05;
+    return { tipo: 'compra', proveedor, rif, numero, fecha, lineas, totalLineas, sumaSubtotales: sumSub, cuadraTotal,
+             unidades: round6(lineas.filter((l) => Number.isFinite(l.cant)).reduce((a, l) => a + l.cant, 0)) };
+  }
+
+  /*
+   * Aplica ventas y compras sobre la última existencia guardada (prev: { código: existencia }).
+   * Devuelve un Valery "virtual" con todos los códigos guardados, solo cambiando los que tienen movimiento.
+   * Las líneas de compra que no cuadran (cantidad × costo ≠ subtotal) no se aplican.
+   */
+  function applyMovements(prev, docs) {
+    const mov = new Map();
+    const get = (code, nombre) => {
+      if (!mov.has(code)) mov.set(code, { code, nombre: nombre || '', ventas: 0, compras: 0 });
+      const m = mov.get(code); if (nombre && !m.nombre) m.nombre = nombre; return m;
+    };
+    for (const d of docs) {
+      for (const l of d.lineas) {
+        if (d.tipo === 'ventas') get(l.code, l.nombre).ventas = round6(get(l.code).ventas + l.cant);
+        else if (d.tipo === 'compra' && l.cuadra && Number.isFinite(l.cant)) get(l.code, l.nombre).compras = round6(get(l.code).compras + l.cant);
+      }
+    }
+    const valery = new Map();
+    for (const [code, ex] of Object.entries(prev)) valery.set(code, { code, nombre: '', existencia: ex });
+    const detalle = [], sinBase = new Map();
+    for (const m of mov.values()) {
+      if (!(m.code in prev)) { sinBase.set(m.code, m.nombre); detalle.push({ ...m, antes: null, despues: null }); continue; }
+      const antes = prev[m.code], despues = round6(antes - m.ventas + m.compras);
+      valery.set(m.code, { code: m.code, nombre: m.nombre, existencia: despues });
+      detalle.push({ ...m, antes, despues });
+    }
+    detalle.sort((a, b) => Number(a.code) - Number(b.code));
+    return { valery, touched: new Set(mov.keys()), detalle, sinBase,
+             totales: { ventas: round6(detalle.reduce((a, d) => a + d.ventas, 0)), compras: round6(detalle.reduce((a, d) => a + d.compras, 0)) } };
+  }
+
+  // Reportes que ya se aplicaron en el último cierre: se vuelve a generar la planilla con ese resultado,
+  // sin descontar ni sumar otra vez (current ya los incluye).
+  function replayMovements(current, docs) {
+    const r = applyMovements({}, docs);             // solo para agrupar ventas/compras por código
+    const valery = new Map(Object.entries(current).map(([code, ex]) => [code, { code, nombre: '', existencia: ex }]));
+    const detalle = [], sinBase = new Map();
+    for (const d of r.detalle) {
+      if (!(d.code in current)) { sinBase.set(d.code, d.nombre); detalle.push({ ...d, antes: null, despues: null }); continue; }
+      valery.set(d.code, { code: d.code, nombre: d.nombre, existencia: current[d.code] });
+      detalle.push({ ...d, antes: round6(current[d.code] + d.ventas - d.compras), despues: current[d.code] });
+    }
+    return { valery, touched: new Set(r.detalle.map((d) => d.code)), detalle, sinBase, totales: r.totales, replay: true };
   }
 
   /* ---------------- Movimiento en Valery entre dos cierres ---------------- */
@@ -278,6 +457,20 @@
     };
   }
 
+  // Unidades que vendió Cashea por código desde el último stock subido (base: { SKU: stock }).
+  function casheaSold(baseCashea, comparison) {
+    const out = new Map();
+    if (!baseCashea) return out;
+    for (const r of comparison.filas) {
+      if (!r.codigo || r.revisarSku || r.stockAnterior === null) continue;
+      const prev = baseCashea[r.sku];
+      if (prev === undefined) continue;
+      const d = prev - r.stockAnterior;
+      if (d > 0) out.set(r.codigo, (out.get(r.codigo) || 0) + d);
+    }
+    return out;
+  }
+
   /* ---------------- Planilla de salida ---------------- */
   async function buildCasheaFile(cashea, comparison) {
     const newVals = new Map(comparison.filas.filter((r) => r.stockNuevo !== null).map((r) => [r.fila, r.stockNuevo]));
@@ -290,7 +483,7 @@
     return cashea.zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
   }
 
-  function buildReport(XLSX, comparison, mov, baseLabel, ventas) {
+  function buildReport(XLSX, comparison, mov, baseLabel, ventas, movimientos) {
     const toRows = (list) => list.map((r) => ({
       'SKU': r.sku, 'Título': r.titulo, 'Código Valery': r.codigo, 'Existencia Valery': r.existenciaValery,
       'Stock anterior': r.stockAnterior, 'Stock nuevo': r.stockNuevo, 'Acción': r.accion, 'Motivo': r.motivo, 'Fila': r.fila,
@@ -309,6 +502,11 @@
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(toRows(comparison.duplicados)), 'Duplicados');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(comparison.noPublicados.map((v) => ({
       'Código': v.code, 'Nombre': v.nombre, 'Existencia': v.existencia }))), 'No publicados en Cashea');
+    if (movimientos) {
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(movimientos.detalle.map((d) => ({
+        'Código': d.code, 'Nombre': d.nombre, 'Existencia guardada': d.antes, 'Ventas': d.ventas, 'Compras': d.compras,
+        'Existencia nueva': d.despues, 'Nota': d.antes === null ? 'Sin existencia guardada: hacer inventario completo' : '' }))), 'Movimientos');
+    }
     if (ventas) {
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ventas.rows.map((r) => ({
         'Código': r.code, 'Nombre': r.nombre, [`Valery ${baseLabel || 'antes'}`]: r.antes, 'Valery ahora': r.ahora,
@@ -325,5 +523,6 @@
     return XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
   }
 
-  return { valeryCode, targetStock, sameProduct, snapshot, casheaSnapshot, movement, dailySales, parseValery, loadCashea, compare, buildCasheaFile, buildReport };
+  return { valeryCode, targetStock, sameProduct, snapshot, casheaSnapshot, movement, dailySales, parseValery, loadCashea, compare,
+           buildCasheaFile, buildReport, detectXls, parseVentas, parseCompra, applyMovements, replayMovements, casheaSold };
 });
